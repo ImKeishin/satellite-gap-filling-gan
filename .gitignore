@@ -2,6 +2,8 @@
 __pycache__/
 *.py[codz]
 *$py.class
+*.pyc
+*.pyo
 
 # C extensions
 *.so
@@ -188,6 +190,10 @@ cython_debug/
 #  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
+# IDE
+.vscode/
+.idea/
+
 # Ruff stuff:
 .ruff_cache/
 
@@ -205,3 +211,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Data
+data/
+*.npy
+
+# Models
+models/
+*.pth
+*.pt
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+
