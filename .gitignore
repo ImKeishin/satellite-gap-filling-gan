@@ -217,7 +217,7 @@ data/
 *.npy
 
 # Models
-models/
+/models/
 *.pth
 *.pt
 
