@@ -22,6 +22,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-channels", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--n-input-times", type=int, default=3)
+    parser.add_argument(
+        "--input-selection",
+        default="top_cloudy",
+        choices=["top_cloudy", "random_all", "least_cloudy"],
+    )
+    parser.add_argument("--input-sampling-repeats", type=int, default=1)
+    parser.add_argument("--min-input-cloud-coverage", type=float, default=0.05)
+    parser.add_argument("--max-input-cloud-coverage", type=float, default=1.0)
     parser.add_argument("--region", default="all", choices=["all", "africa", "america", "asiaEast", "asiaWest", "europa"])
     parser.add_argument("--cloud-detector", default="s2cloudless", choices=["s2cloudless", "heuristic"])
     parser.add_argument("--checkpoint-dir", default="checkpoints_sen12mscrts")
@@ -40,9 +48,24 @@ def main() -> None:
         region=args.region,
         n_input_times=args.n_input_times,
         cloud_detector=args.cloud_detector,
+        min_input_cloud_coverage=args.min_input_cloud_coverage,
+        max_input_cloud_coverage=args.max_input_cloud_coverage,
     )
-    train_dataset = SEN12MSCRTSDataset(split="train", max_samples=args.max_train_samples, **common)
-    val_dataset = SEN12MSCRTSDataset(split="val", max_samples=args.max_val_samples, **common)
+    train_dataset = SEN12MSCRTSDataset(
+        split="train",
+        max_samples=args.max_train_samples,
+        input_selection=args.input_selection,
+        input_sampling_repeats=args.input_sampling_repeats,
+        **common,
+    )
+
+    val_dataset = SEN12MSCRTSDataset(
+        split="val",
+        max_samples=args.max_val_samples,
+        input_selection="least_cloudy",
+        input_sampling_repeats=1,
+        **common,
+    )
     print(f"Train samples: {len(train_dataset)} | Validation samples: {len(val_dataset)}")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=torch.cuda.is_available())

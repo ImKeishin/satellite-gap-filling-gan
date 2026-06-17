@@ -96,6 +96,8 @@ class SEN12MSCRTSDataset(Dataset):
         cloud_threshold: float = 0.4,
         min_input_cloud_coverage: float = 0.05,
         max_input_cloud_coverage: float = 1.0,
+        input_selection: Literal["top_cloudy", "random_all", "least_cloudy"] = "top_cloudy",
+        input_sampling_repeats: int = 1,
         max_samples: int | None = None,
     ) -> None:
         super().__init__()
@@ -114,6 +116,12 @@ class SEN12MSCRTSDataset(Dataset):
         self.cloud_detector_name = cloud_detector
         self.min_input_cloud_coverage = min_input_cloud_coverage
         self.max_input_cloud_coverage = max_input_cloud_coverage
+        self.input_selection = input_selection
+        self.input_sampling_repeats = input_sampling_repeats
+
+        if self.input_sampling_repeats < 1:
+            raise ValueError("input_sampling_repeats must be >= 1")
+        
         self.cloud_detector = None
         if cloud_detector == "s2cloudless":
             self.cloud_detector = S2PixelCloudDetector(
@@ -134,9 +142,15 @@ class SEN12MSCRTSDataset(Dataset):
             requested = set(roi_filter)
             selected = [roi for roi in selected if roi in requested]
 
-        self.samples = self._build_index(selected)
+        base_samples = self._build_index(selected)
         if max_samples is not None:
-            self.samples = self.samples[:max_samples]
+            base_samples = base_samples[:max_samples]
+
+        self.samples = []
+        for sample in base_samples:
+            for _ in range(self.input_sampling_repeats):
+                self.samples.append(sample)
+
         if not self.samples:
             raise ValueError(
                 "No samples found. Check the extracted folder structure. Expected e.g. "
@@ -211,14 +225,50 @@ class SEN12MSCRTSDataset(Dataset):
         coverages = np.asarray([float(mask.mean()) for mask in masks], dtype=np.float32)
 
         target_time = int(np.argmin(coverages))
-        ranked = [int(i) for i in np.argsort(-coverages) if int(i) != target_time]
-        filtered = [
-            i for i in ranked
+
+        non_target_times = [int(i) for i in range(self.time_count) if int(i) != target_time]
+
+        eligible = [
+            i for i in non_target_times
             if self.min_input_cloud_coverage <= float(coverages[i]) <= self.max_input_cloud_coverage
         ]
-        if len(filtered) < self.n_input_times:
-            filtered = ranked
-        input_times = filtered[: self.n_input_times]
+
+        def fill_with_cleaner_times(chosen: list[int]) -> list[int]:
+            chosen = list(chosen)
+            if len(chosen) >= self.n_input_times:
+                return chosen[: self.n_input_times]
+
+            fallback = [
+                i for i in sorted(non_target_times, key=lambda j: float(coverages[j]))
+                if i not in chosen
+            ]
+
+            chosen.extend(fallback[: self.n_input_times - len(chosen)])
+            return chosen[: self.n_input_times]
+
+
+        if self.input_selection == "top_cloudy":
+            pool = eligible if len(eligible) >= self.n_input_times else non_target_times
+            ranked = sorted(pool, key=lambda i: float(coverages[i]), reverse=True)
+            input_times = ranked[: self.n_input_times]
+
+        elif self.input_selection == "least_cloudy":
+            pool = eligible if len(eligible) >= self.n_input_times else non_target_times
+            ranked = sorted(pool, key=lambda i: float(coverages[i]))
+            input_times = ranked[: self.n_input_times]
+
+        elif self.input_selection == "random_all":
+            if len(eligible) >= self.n_input_times:
+                input_times = np.random.choice(
+                    eligible,
+                    size=self.n_input_times,
+                    replace=False,
+                ).astype(int).tolist()
+            else:
+                input_times = fill_with_cleaner_times(eligible)
+
+        else:
+            raise ValueError(f"Unknown input_selection: {self.input_selection}")
 
         condition = np.concatenate([self._normalize(raw_sequence[t]) for t in input_times], axis=0)
         target = self._normalize(raw_sequence[target_time])
