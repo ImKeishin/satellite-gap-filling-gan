@@ -25,9 +25,21 @@ def parse_args():
     parser.add_argument("--max-samples", type=int, default=256)
     parser.add_argument("--max-visuals", type=int, default=10)
     parser.add_argument("--cloud-detector", default="s2cloudless", choices=["s2cloudless", "heuristic"])
+    parser.add_argument(
+        "--input-selection",
+        default="random_all",
+        choices=["top_cloudy", "random_all", "least_cloudy"],
+    )
+    parser.add_argument("--input-random-seed", type=int, default=42)
+    parser.add_argument("--min-input-cloud-coverage", type=float, default=0.05)
+    parser.add_argument("--max-input-cloud-coverage", type=float, default=0.95)
     parser.add_argument("--output-dir", default="results_sen12mscrts/evaluation")
     return parser.parse_args()
 
+def _to_int(value) -> int:
+    if hasattr(value, "item"):
+        return int(value.item())
+    return int(value)
 
 @torch.no_grad()
 def main():
@@ -43,6 +55,11 @@ def main():
         n_input_times=args.n_input_times,
         max_samples=args.max_samples,
         cloud_detector=args.cloud_detector,
+        input_selection=args.input_selection,
+        input_sampling_repeats=1,
+        random_seed=args.input_random_seed,
+        min_input_cloud_coverage=args.min_input_cloud_coverage,
+        max_input_cloud_coverage=args.max_input_cloud_coverage,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
     generator, _ = build_models(args.n_input_times * 13, 13, args.base_channels)
@@ -60,10 +77,25 @@ def main():
             cond_np = to_zero_one(condition[item], True)
             pred_np = to_zero_one(prediction[item], True)
             target_np = to_zero_one(target[item], True)
+            input_times = batch["input_times"][item].detach().cpu().numpy().astype(int).tolist()
+            target_time = _to_int(batch["target_time"][item])
+            coverages = batch["cloud_coverages"][item].detach().cpu().numpy()
+
+            input_coverages = [float(coverages[t]) for t in input_times]
+            target_coverage = float(coverages[target_time])
+            union_coverage = float(batch["mask"][item].mean().item())
+
+            sample_index = batch_idx * args.batch_size + item
             row = {
                 "sample": batch_idx * args.batch_size + item,
                 "roi_name": batch["roi_name"][item],
                 "patch_index": int(batch["patch_index"][item]),
+                "input_times": ",".join(map(str, input_times)),
+                "target_time": target_time,
+                "input_coverages": ",".join(f"{x:.6f}" for x in input_coverages),
+                "average_input_coverage": sum(input_coverages) / len(input_coverages),
+                "target_coverage": target_coverage,
+                "union_coverage": union_coverage,
                 "mae": mae(pred_np, target_np),
                 "psnr": psnr(pred_np, target_np),
                 "ssim": ssim(pred_np, target_np),
@@ -75,7 +107,20 @@ def main():
 
     csv_path = output_dir / "metrics.csv"
     with open(csv_path, "w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=["sample", "roi_name", "patch_index", "mae", "psnr", "ssim"])
+        writer = csv.DictWriter(file, 
+                                fieldnames=["sample", 
+                                            "roi_name", 
+                                            "patch_index", 
+                                            "input_times",
+                                            "target_time",
+                                            "input_coverages",
+                                            "average_input_coverage",
+                                            "target_coverage",
+                                            "union_coverage",
+                                            "mae", 
+                                            "psnr", 
+                                            "ssim"
+                                ])
         writer.writeheader()
         writer.writerows(rows)
     print(f"MAE:  {sum(float(r['mae']) for r in rows) / len(rows):.6f}")

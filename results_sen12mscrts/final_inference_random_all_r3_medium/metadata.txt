@@ -1,0 +1,11 @@
+sample_index: 21
+roi_name: ROIs2017/32
+patch_index: 21
+input_selection: random_all
+input_random_seed: 42
+input_times: [12, 17, 23]
+target_time: 0
+input_coverages: [0.1587982177734375, 0.0569305419921875, 0.861846923828125]
+average_input_coverage: 0.359192
+target_coverage: 0.000000
+union_coverage: 0.868515

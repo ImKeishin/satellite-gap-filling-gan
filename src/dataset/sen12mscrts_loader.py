@@ -98,6 +98,7 @@ class SEN12MSCRTSDataset(Dataset):
         max_input_cloud_coverage: float = 1.0,
         input_selection: Literal["top_cloudy", "random_all", "least_cloudy"] = "top_cloudy",
         input_sampling_repeats: int = 1,
+        random_seed: int | None = None,
         max_samples: int | None = None,
     ) -> None:
         super().__init__()
@@ -118,6 +119,7 @@ class SEN12MSCRTSDataset(Dataset):
         self.max_input_cloud_coverage = max_input_cloud_coverage
         self.input_selection = input_selection
         self.input_sampling_repeats = input_sampling_repeats
+        self.random_seed = random_seed
 
         if self.input_sampling_repeats < 1:
             raise ValueError("input_sampling_repeats must be >= 1")
@@ -259,7 +261,12 @@ class SEN12MSCRTSDataset(Dataset):
 
         elif self.input_selection == "random_all":
             if len(eligible) >= self.n_input_times:
-                input_times = np.random.choice(
+                if self.random_seed is None:
+                    rng = np.random.default_rng()
+                else:
+                    rng = np.random.default_rng(self.random_seed + index)
+
+                input_times = rng.choice(
                     eligible,
                     size=self.n_input_times,
                     replace=False,
