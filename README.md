@@ -84,15 +84,20 @@ The dataset is not included in this repository because of its size.
 
 ## Data Selection Strategy
 
-For every spatial patch, the loader reads the complete sequence of 30 temporal observations.
+For every spatial patch, the loader reads the complete sequence of 30 Sentinel-2 temporal observations.
 
-Cloud masks are computed automatically using `s2cloudless`.
+Cloud masks are computed automatically using `s2cloudless`. The cloud coverage of each temporal observation is estimated from the corresponding mask.
 
-The loader then selects:
+The reconstruction target is selected as the least-cloudy available observation in the temporal sequence. This target is not guaranteed to be perfectly cloud-free; it is only the clearest observation available for that patch.
 
-* the least-cloudy temporal observation as the reconstruction target;
-* cloudier observations as temporal input conditions;
-* the union of the selected cloud masks as an auxiliary mask.
+For the final experiment, the temporal input condition is built using:
+
+```text
+--input-selection random_all
+--input-sampling-repeats 3
+--min-input-cloud-coverage 0.05
+--max-input-cloud-coverage 0.95
+```
 
 The default configuration uses three cloudy temporal inputs:
 
@@ -101,8 +106,6 @@ input shape:  (39, H, W)
 target shape: (13, H, W)
 mask shape:   (1, H, W)
 ```
-
-The target is the **least-cloudy available observation**, rather than a guaranteed perfectly cloud-free image.
 
 ---
 
@@ -146,6 +149,23 @@ where:
 * `lambda_L1 = 100` by default.
 
 The discriminator is trained to distinguish real targets from generated images.
+
+---
+
+## Implemented Contributions
+
+This repository does not propose a completely new GAN architecture. Instead, it implements and adapts a conditional GAN pipeline for multispectral and multi-temporal Sentinel-2 reconstruction.
+
+The main implemented contributions are:
+
+- loading complete 30-step SEN12MS-CR-TS Sentinel-2 temporal sequences;
+- estimating cloud coverage using automatically generated `s2cloudless` masks;
+- selecting the least-cloudy observation as the reconstruction target;
+- constructing a temporal input condition from three eligible Sentinel-2 observations;
+- adapting a U-Net generator to map 39 input channels to 13 output channels;
+- using a conditional PatchGAN discriminator for local realism;
+- training, validating, evaluating, and running inference on the SEN12MS-CR-TS Africa split;
+- saving both full 13-band predictions and RGB comparison images for qualitative analysis.
 
 ---
 
@@ -330,13 +350,17 @@ python -m scripts.train_sen12mscrts `
   --max-train-samples 3000 `
   --max-val-samples 256 `
   --cloud-detector s2cloudless `
-  --checkpoint-dir checkpoints_sen12mscrts_final
+  --input-selection random_all `
+  --input-sampling-repeats 3 `
+  --min-input-cloud-coverage 0.05 `
+  --max-input-cloud-coverage 0.95 `
+  --checkpoint-dir checkpoints_sen12mscrts_random_all_r3
 ```
 
 Generated files:
 
 ```text
-checkpoints_sen12mscrts_final/
+checkpoints_sen12mscrts_random_all_r3/
   best.pt
   last.pt
   history.json
@@ -353,7 +377,7 @@ Evaluate the final checkpoint on the separate test split:
 ```powershell
 python -m scripts.evaluate_sen12mscrts `
   --root-dir <path-to-test-root> `
-  --checkpoint checkpoints_sen12mscrts_final\best.pt `
+  --checkpoint checkpoints_sen12mscrts_random_all_r3\best.pt `
   --split test `
   --region africa `
   --n-input-times 3 `
@@ -361,14 +385,18 @@ python -m scripts.evaluate_sen12mscrts `
   --max-samples 256 `
   --max-visuals 20 `
   --cloud-detector s2cloudless `
-  --output-dir results_sen12mscrts\final_test
+  --input-selection random_all `
+  --input-random-seed 42 `
+  --min-input-cloud-coverage 0.05 `
+  --max-input-cloud-coverage 0.95 `
+  --output-dir results_sen12mscrts\final_test_random_all_r3
 ```
 
 Generated files:
 
 ```text
 results_sen12mscrts/
-  final_test/
+  final_test_random_all_r3/
     metrics.csv
     sample_0000.png
     sample_0001.png
@@ -386,21 +414,25 @@ Generate a 13-band reconstruction and an RGB visual comparison for one test samp
 ```powershell
 python -m scripts.inference_sen12mscrts `
   --root-dir <path-to-test-root> `
-  --checkpoint checkpoints_sen12mscrts_final\best.pt `
+  --checkpoint checkpoints_sen12mscrts_random_all_r3\best.pt `
   --split test `
   --region africa `
   --sample-index 0 `
   --n-input-times 3 `
   --base-channels 32 `
   --cloud-detector s2cloudless `
-  --output-dir results_sen12mscrts\final_inference
+  --input-selection random_all `
+  --input-random-seed 42 `
+  --min-input-cloud-coverage 0.05 `
+  --max-input-cloud-coverage 0.95 `
+  --output-dir results_sen12mscrts\final_inference_random_all_r3
 ```
 
 Generated files:
 
 ```text
 results_sen12mscrts/
-  final_inference/
+  final_inference_random_all_r3/
     prediction_13bands.npy
     comparison.png
 ```
@@ -442,21 +474,26 @@ results_sen12mscrts/
 The final baseline experiment uses:
 
 ```text
-Dataset:              SEN12MS-CR-TS
-Sensor:               Sentinel-2 only
-Region:               Africa
-Temporal inputs:      3
-Input channels:       39
-Output channels:      13
-Generator:            U-Net
-Discriminator:        PatchGAN
-Cloud detector:       s2cloudless
-Loss:                 adversarial + 100 × L1
-Training epochs:      20
-Batch size:           2
-Training subset:      up to 3000 samples
-Validation subset:    up to 256 samples
-Evaluation metrics:   MAE, PSNR, SSIM
+Dataset:                    SEN12MS-CR-TS
+Sensor:                     Sentinel-2 only
+Region:                     Africa
+Temporal observations:      30 per spatial patch
+Temporal inputs:            3
+Input selection:            random_all
+Input sampling repeats:     3
+Min input cloud coverage:   0.05
+Max input cloud coverage:   0.95
+Input channels:             39
+Output channels:            13
+Generator:                  U-Net
+Discriminator:              PatchGAN
+Cloud detector:             s2cloudless
+Loss:                       adversarial + 100 × L1
+Training epochs:            20
+Batch size:                 2
+Training subset:            up to 3000 samples
+Validation subset:          up to 256 samples
+Evaluation metrics:         MAE, PSNR, SSIM
 ```
 
 ---
